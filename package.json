@@ -35,6 +35,6 @@
   },
   "overrides": {
     "diff": "9.0.0",
-    "serialize-javascript": "7.1.0"
+    "serialize-javascript": "7.1.3"
   }
 }
