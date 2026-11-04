@@ -63,6 +63,9 @@ jobs:
       - name: Audit complete toolchain
         run: npm audit --audit-level=high
 
+      - name: Check secure toolchain and configuration validation
+        run: npm run test:tooling
+
       - name: Compile contracts
         run: npm run compile -- --no-tests
 
