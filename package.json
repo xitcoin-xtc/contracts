@@ -13,7 +13,9 @@
     "compile": "hardhat compile",
     "deploy:cronos-testnet": "hardhat run scripts/deploy-cronos-testnet.js --network cronosTestnet",
     "clean": "hardhat clean",
-    "audit:production": "npm audit --omit=dev"
+    "audit:production": "npm audit --omit=dev",
+    "postinstall": "node scripts/patch-hardhat-zod.mjs",
+    "test:tooling": "node --test scripts/check-hardhat-zod.mjs"
   },
   "keywords": [],
   "author": "",
@@ -39,6 +41,8 @@
     "mocha": {
       "glob": "14.0.2",
       "minimatch": "11.0.1"
-    }
+    },
+    "zod": "4.6.6",
+    "@nomicfoundation/hardhat-zod-utils": "3.0.6"
   }
 }

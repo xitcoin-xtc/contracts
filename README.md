@@ -62,6 +62,20 @@ jq . ecosystem/cronos.json
 
 Expected source hashes are recorded in `deployments/cronos.json`.
 
+## Development dependency compatibility
+
+The lockfile uses Zod 4.6.6 to fix GHSA-mrhx-c7xc-m3w5. Hardhat's
+`hardhat-zod-utils` 3.0.6 still expects two Zod 3 error APIs. The installation
+script applies a checksum-checked compatibility patch: use `error.issues` and
+the `error` customization option. It rejects unexpected helper versions or
+source changes and does not run against a production-only install.
+
+Run `npm run test:tooling` to check early rejection of oversized collections,
+configuration schemas and actual CLI rejection of invalid configurations.
+The full audit and Solidity tests remain blocking in CI. Remove this temporary
+patch when a supported upstream release provides equivalent compatibility;
+do not replace Zod 4 with the vulnerable `zod/v3` compatibility entry.
+
 ## Security
 
 Verify the chain, address and intended function before signing. Report vulnerabilities privately according to [`SECURITY.md`](SECURITY.md).
