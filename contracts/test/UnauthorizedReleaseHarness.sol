@@ -11,7 +11,7 @@ contract UnauthorizedReleaseHarness {
     constructor() {
         token = new MockERC20("Synthetic", "TEST");
         vault = new CronosBridgeVault(token, keccak256("synthetic-route"),
-            [address(0x1111),address(0x2222),address(0x3333)],address(0x4444),10000,100000,false);
+            [address(0x1111),address(0x2222),address(0x3333)],address(0x4444),10000,100000,10000,100000,2000000,false);
         token.mint(address(vault),1000000);
     }
     function attempt(bytes32 burn,address recipient,uint64 amount,bytes calldata signature) external {

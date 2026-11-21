@@ -18,7 +18,7 @@ contract VaultInvariantsTest {
         vm.chainId(338);
         token = new AdversarialERC20();
         address[3] memory signers = [vm.addr(1), vm.addr(2), vm.addr(3)];
-        vault = new CronosBridgeVault(token, keccak256("cronos-testnet-xitcoin-testnet"), signers, address(this), 10000, 100000, false);
+        vault = new CronosBridgeVault(token, keccak256("cronos-testnet-xitcoin-testnet"), signers, address(this), 10000, 100000, 10000, 100000, 2000000, false);
         token.mint(address(vault), 1000000);
     }
     function signatures(bytes32 burn, uint256 amount) internal returns(bytes[] memory sigs) {

@@ -34,7 +34,10 @@ const plan = validateCronosTestnetPlan({
   tokenRecipient: process.env.BRIDGE_TESTNET_TOKEN_RECIPIENT || deployer.address,
   tokenSupply: process.env.BRIDGE_TESTNET_TOKEN_SUPPLY || '1000000',
   maxReleaseAmount: process.env.BRIDGE_TESTNET_MAX_RELEASE || '100',
-  dailyReleaseLimit: process.env.BRIDGE_TESTNET_DAILY_LIMIT || '500'
+  dailyReleaseLimit: process.env.BRIDGE_TESTNET_DAILY_LIMIT || '500',
+  maxDepositAmount: process.env.BRIDGE_TESTNET_MAX_DEPOSIT || '100',
+  dailyDepositLimit: process.env.BRIDGE_TESTNET_DAILY_DEPOSIT_LIMIT || '500',
+  maxLockedAmount: process.env.BRIDGE_TESTNET_MAX_LOCKED || '10000'
 });
 
 const balance = await ethers.provider.getBalance(deployer.address);
@@ -54,6 +57,9 @@ const vault = await Vault.deploy(
   plan.guardian,
   plan.maxReleaseAmount,
   plan.dailyReleaseLimit,
+  plan.maxDepositAmount,
+  plan.dailyDepositLimit,
+  plan.maxLockedAmount,
   true
 );
 await vault.waitForDeployment();
@@ -88,6 +94,9 @@ const deployed = Object.freeze({
       guardian: plan.guardian,
       max_release_amount: plan.maxReleaseAmount.toString(),
       daily_release_limit: plan.dailyReleaseLimit.toString(),
+      max_deposit_amount: plan.maxDepositAmount.toString(),
+      daily_deposit_limit: plan.dailyDepositLimit.toString(),
+      max_locked_amount: plan.maxLockedAmount.toString(),
       paused_at_deployment: true
     }
   }

@@ -10,9 +10,14 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// @title CronosBootstrapEscrow
 /// @notice Holds the one-time Cronos XTC mainnet bootstrap reserve until a
 ///         2-of-3 quorum either activates the permanent bridge vault or
-///         cancels the unopened network and refunds the fixed funding account.
-/// @dev The Xitcoin network MUST remain private until `activate` succeeds.
-///      There is no arbitrary recipient and each terminal outcome excludes the other.
+///         cancels the unopened network and refunds the fixed refund recipient.
+///         If neither decision is made within `REFUND_TIMEOUT` of funding,
+///         anyone may refund the reserve to the fixed refund recipient.
+/// @dev Keeping the Xitcoin network private until `activate` succeeds is an
+///      operational procedure; no contract or chain rule enforces it.
+///      There is no arbitrary recipient and each terminal outcome excludes the
+///      others. Decision signers are immutable: the timeout refund is the only
+///      exit if a quorum of them becomes unavailable.
 contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -27,6 +32,9 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
     );
     bytes32 public constant ACTION_ACTIVATE = keccak256("ACTIVATE");
     bytes32 public constant ACTION_CANCEL = keccak256("CANCEL");
+    /// @notice Delay after funding after which quorum decisions end and anyone
+    ///         may refund the reserve to the fixed refund recipient.
+    uint256 public constant REFUND_TIMEOUT = 180 days;
 
     enum State {
         AwaitingFunding,
@@ -46,6 +54,8 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
     mapping(address signer => bool enabled) public isSigner;
     uint256 public decisionNonce;
     State public state;
+    /// @notice Block timestamp of the successful `fund` call; zero before.
+    uint256 public fundedAt;
 
     error InvalidAddress();
     error InvalidAmount();
@@ -60,6 +70,8 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
     error UnauthorizedSigner();
     error UnsupportedTokenBehavior();
     error InsufficientFunding();
+    error RefundTimeoutNotReached();
+    error RefundTimeoutElapsed();
 
     event BootstrapFunded(address indexed funder, uint256 amount);
     event BootstrapActivated(
@@ -71,6 +83,12 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
         address indexed refundRecipient,
         uint256 refundedAmount,
         bytes32 indexed genesisHash
+    );
+    event BootstrapRefundedAfterTimeout(
+        address indexed refundRecipient,
+        uint256 refundedAmount,
+        bytes32 indexed genesisHash,
+        address indexed caller
     );
     event TerminalBalanceForwarded(
         address indexed fixedRecipient,
@@ -128,10 +146,20 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
         }
 
         state = State.Funded;
+        fundedAt = block.timestamp;
         emit BootstrapFunded(msg.sender, expectedAmount);
     }
 
+    /// @notice Returns the timestamp from which `refundAfterTimeout` is
+    ///         callable and quorum decisions are rejected; zero before funding.
+    function refundAvailableAt() external view returns (uint256) {
+        if (state == State.AwaitingFunding) return 0;
+        return fundedAt + REFUND_TIMEOUT;
+    }
+
     /// @notice Irreversibly moves all canonical XTC held here to the permanent vault.
+    /// @dev Only before `refundAvailableAt()`. After the timeout a stale
+    ///      quorum approval cannot activate.
     function activate(
         uint256 nonce,
         uint256 deadline,
@@ -148,6 +176,8 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
     }
 
     /// @notice Refunds all canonical XTC if the still-private launch is abandoned.
+    /// @dev Only before `refundAvailableAt()`; afterwards use
+    ///      `refundAfterTimeout`, which has the same fixed recipient.
     function cancel(
         uint256 nonce,
         uint256 deadline,
@@ -163,10 +193,35 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
         emit BootstrapCancelled(refundRecipient, amount, genesisHash);
     }
 
+    /// @notice Refunds all canonical XTC to the fixed refund recipient once
+    ///         `REFUND_TIMEOUT` has elapsed since funding without a decision.
+    /// @dev Permissionless; the recipient is immutable. Moves the escrow to
+    ///      `Cancelled`, so activation and cancellation become impossible.
+    ///      Unlike `cancel`, it does not require the balance to cover
+    ///      `expectedAmount`: its purpose is that the reserve can always leave.
+    function refundAfterTimeout() external nonReentrant {
+        if (state != State.Funded) revert InvalidState();
+        if (block.timestamp < fundedAt + REFUND_TIMEOUT) {
+            revert RefundTimeoutNotReached();
+        }
+        state = State.Cancelled;
+
+        uint256 amount = asset.balanceOf(address(this));
+        asset.safeTransfer(refundRecipient, amount);
+
+        emit BootstrapRefundedAfterTimeout(
+            refundRecipient,
+            amount,
+            genesisHash,
+            msg.sender
+        );
+    }
+
     /// @notice Forwards canonical XTC sent directly after the terminal decision.
     /// @dev Anyone may trigger this, but the recipient is fixed by the terminal
     ///      state: the permanent vault after activation, or the refund recipient
-    ///      after cancellation. No caller can redirect the funds.
+    ///      after cancellation or a timeout refund. No caller can redirect the
+    ///      funds.
     function forwardTerminalBalance() external nonReentrant {
         State terminalState = state;
         if (
@@ -195,6 +250,9 @@ contract CronosBootstrapEscrow is EIP712, ReentrancyGuard {
         bytes[] calldata signatures
     ) internal {
         if (state != State.Funded) revert InvalidState();
+        if (block.timestamp >= fundedAt + REFUND_TIMEOUT) {
+            revert RefundTimeoutElapsed();
+        }
         if (nonce != decisionNonce) revert InvalidNonce();
         if (block.timestamp > deadline) revert SignatureExpired();
 

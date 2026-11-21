@@ -21,20 +21,91 @@ The implementation address may change through the independently governed UUPS up
 
 ## Security model
 
-- every release is bound by EIP-712 to the Cronos chain ID and the deployed vault address;
+- every release and control approval is bound by EIP-712 to the Cronos chain ID and the deployed vault address;
 - every release identifies one native Xitcoin burn and that identifier can be processed only once;
 - two distinct approvals from the current three-member signer set are required;
 - signer-set versions prevent approvals from silently crossing a signer rotation;
 - signatures expire;
-- per-release and daily limits cap exposure;
+- per-release and daily release limits cap release exposure;
+- per-deposit, daily deposit and total locked limits cap what can be locked;
 - releases cannot exceed the vault's actual XTC balance;
 - deposits and releases reject the zero and conventional dead addresses;
 - the emergency guardian can pause immediately but cannot resume the vault;
-- resumption, signer rotation, limit changes and guardian changes require signer quorum and a monotonic governance nonce;
+- resumption, signer rotation, release and deposit limit changes, guardian changes and foreign-token rescue require signer quorum and a monotonic governance nonce;
 - no owner or administrative withdrawal of canonical XTC exists;
 - a quorum-controlled rescue is restricted to unrelated ERC-20 assets.
 
 The signer service must approve a release only after independently confirming finality, the native burn amount, the recipient, the route, the signer-set version and the absence of an earlier approval for the same burn identifier.
+
+### Who can do what
+
+| Actor | Can | Cannot |
+|---|---|---|
+| Anyone | `deposit` while not paused and within the deposit limits; submit a `release` or control action that carries valid quorum signatures (the submitter is not part of what is signed) | Move canonical XTC out of the vault without a valid release approval |
+| Guardian | `pause` (stops `deposit` and `release` immediately) | Resume, change limits, rotate signers, replace itself, rescue tokens or move funds |
+| 2 of the 3 current signers | Approve `release`, `resume`, `rotateSigners`, `updateLimits` (release limits), `updateDepositLimits`, `changeGuardian`, `rescueForeignToken` | Rescue canonical XTC; reuse an approval after its nonce, signer-set version or deadline has passed |
+
+Control actions other than `resume` are accepted whether or not the vault is paused; `resume` requires the paused state. All of them take effect in the transaction that executes them; there is no delay. The guardian therefore cannot veto a compromised quorum: the same quorum can replace the guardian, raise limits and resume. Options for changing this are described, but not implemented, in [`GOVERNANCE_PROPOSAL.md`](GOVERNANCE_PROPOSAL.md).
+
+### What each signature binds
+
+All signatures use the EIP-712 domain `name = "Xitcoin Cronos Bridge Vault"`, `version = "1"`, the Cronos chain ID and the vault address. Nothing else about the route is signed: the canonical asset and `routeId` are immutable per vault and are bound only through the vault address.
+
+- `Release(bytes32 sourceBurnId,address recipient,uint256 amount,uint64 signerSetVersion,uint256 deadline)`. Replay is prevented by `processedBurns[sourceBurnId]`, not by a nonce. The approval does not bind the caller.
+- `Control(bytes32 action,bytes32 payloadHash,uint256 nonce,uint64 signerSetVersion,uint256 deadline)`, where `nonce` must equal the single shared `governanceNonce` (incremented by every successful control action) and `payloadHash` is:
+
+| Action (`keccak256` of) | Function | `payloadHash` |
+|---|---|---|
+| `RESUME` | `resume` | `bytes32(0)` |
+| `ROTATE_SIGNERS` | `rotateSigners` | `keccak256(abi.encode(address[3] newSigners))` |
+| `UPDATE_LIMITS` | `updateLimits` | `keccak256(abi.encode(maxReleaseAmount, dailyReleaseLimit))` |
+| `UPDATE_DEPOSIT_LIMITS` | `updateDepositLimits` | `keccak256(abi.encode(maxDepositAmount, dailyDepositLimit, maxLockedAmount))` |
+| `CHANGE_GUARDIAN` | `changeGuardian` | `keccak256(abi.encode(newGuardian))` |
+| `RESCUE_FOREIGN_TOKEN` | `rescueForeignToken` | `keccak256(abi.encode(token, recipient, amount))` |
+
+Because all control actions share one nonce, approvals are strictly ordered: two approvals signed for the same nonce can never both execute, and an approval left unused is invalidated by any other control action.
+
+Deposits are not signed. Each `Deposited` event carries `depositId = keccak256(abi.encode(block.chainid, vault, routeId, depositor, recipient, amount, depositNonce))`.
+
+## Limits
+
+All amounts are in the canonical token's base units (18 decimals). Day buckets are UTC days computed as `block.timestamp / 1 days`, so a new bucket starts at 00:00:00 UTC by block time. A failed transaction leaves every counter unchanged.
+
+### Vault release limits
+
+- `maxReleaseAmount`: a release above it reverts with `ReleaseLimitExceeded`;
+- `dailyReleaseLimit`: `releasedToday` resets when the UTC day changes; a release that would take it above the limit reverts with `DailyLimitExceeded`;
+- a release above the vault's current XTC balance reverts with `InsufficientLiquidity`.
+
+### Vault deposit limits
+
+- `maxDepositAmount`: a deposit above it reverts with `DepositLimitExceeded`;
+- `dailyDepositLimit`: `depositedToday` resets when the UTC day changes (`depositDay` holds the day index); a deposit that would take it above the limit reverts with `DailyDepositLimitExceeded`;
+- `maxLockedAmount`: a deposit reverts with `LockedAmountCapExceeded` if `asset.balanceOf(vault) + amount` would exceed it. The check uses the vault's real token balance, so direct transfers to the vault (donations) and the bootstrap reserve moved in by `CronosBootstrapEscrow` count toward the cap, although neither goes through `deposit` and neither is limited by it.
+
+All three are set in the constructor and can be changed only by a quorum `updateDepositLimits` action. The constructor and the action require every value to be non-zero, `maxDepositAmount <= dailyDepositLimit` and `maxDepositAmount <= maxLockedAmount`; otherwise they revert with `InvalidDepositLimits`. A change applies immediately and does not reset the current day's total. Lowering `dailyDepositLimit` below the day's total blocks deposits until the next UTC day; lowering `maxLockedAmount` below the current balance blocks deposits until releases bring the balance back under it. Deposit limits never affect releases.
+
+Anyone can fill the locked cap with a direct transfer and so block deposits. Such a transfer cannot be withdrawn by its sender, so it is costly; the quorum can respond by raising the cap within the Xitcoin route limit, and the guardian can pause.
+
+### Xitcoin route limits
+
+The Xitcoin bridge module enforces its own route configuration, independently of this vault. As implemented in the chain's `x/bridge` module at the time of writing (that repository is authoritative):
+
+- `max_transfer_amount`: maximum amount of one inbound settlement or outbound burn;
+- `daily_limit`: one bucket per route and UTC day of block time, shared by inbound settlements and outbound burns;
+- `max_outstanding_amount`: an inbound settlement is rejected if the bridge's outstanding amount (the genesis value plus bridge mints minus bridge burns) would exceed it; an outbound burn cannot exceed the outstanding amount.
+
+### Configuring the vault against the route
+
+The deposit limits exist so that a deposit the chain could not mint is rejected on Cronos instead of being locked:
+
+- set `maxDepositAmount` no higher than the route's `max_transfer_amount`; a larger deposit could never be settled on Xitcoin;
+- set `maxLockedAmount` no higher than the route's `max_outstanding_amount`. Every outstanding native unit is backed by locked XTC, and locked XTC also includes deposits not yet settled and donations, so the vault balance is at least the chain's outstanding amount; capping the balance keeps every accepted deposit within the outstanding limit. This assumes the route's genesis outstanding amount matches the bootstrap reserve and that releases follow burns;
+- size `maxLockedAmount` to include the bootstrap reserve, which counts toward the balance from activation onward;
+- `dailyDepositLimit` cannot guarantee same-day settlement, because the chain's daily bucket is shared with outbound burns; an accepted deposit can be delayed until that bucket has room;
+- compare the values on both sides in the same base units, and re-check the vault whenever the route configuration changes.
+
+The contract cannot read the chain's configuration; keeping these values consistent is an operational responsibility of whoever approves the configuration on both sides.
 
 ## Build and tests
 
@@ -58,7 +129,7 @@ Deployment is a separate reviewed operation. Before any Cronos transaction:
 
 1. confirm the canonical XTC proxy from `deployments/cronos.json` and the Cronos Explorer;
 2. define three distinct bridge signer addresses and a separate guardian;
-3. define conservative initial release limits;
+3. define conservative initial release limits and deposit limits consistent with the Xitcoin route (see [Limits](#limits));
 4. derive and record the route identifier;
 5. reproduce the build from `package-lock.json`;
 6. test construction on Cronos testnet;
@@ -75,8 +146,15 @@ asset and the vault for route
 `XTC:CRONOS-TESTNET:338:XITCOIN-TESTNET-V2-1`, and writes a new local deployment
 record with mode `0600`. The vault starts paused and requires a later 2-of-3
 signer approval to resume. It refuses Cronos mainnet chain ID `25`, duplicate
-signers, a signer used as guardian, unsafe limits, an unfunded tCRO deployer and
-overwriting an earlier record.
+signers, a signer used as guardian, unsafe release or deposit limits, an unfunded
+tCRO deployer and overwriting an earlier record. Deposit limits default to
+`BRIDGE_TESTNET_MAX_DEPOSIT=100`, `BRIDGE_TESTNET_DAILY_DEPOSIT_LIMIT=500` and
+`BRIDGE_TESTNET_MAX_LOCKED=10000` tXTC.
+
+The vault recorded in `deployments/cronos-testnet.json` was deployed from the
+earlier bytecode and predates deposit limits: it has no deposit limits and its
+constructor takes seven arguments. Testing deposit limits on Cronos testnet
+needs a new, separately reviewed deployment.
 
 Use `.env.example` as a variable checklist, inject the values from a private
 secret store, provide distinct test-only identities, and run only after an
