@@ -15,8 +15,10 @@ ERC-20 behavior.
 | Monotonic governance | Current nonce and signer-set version, increment on success | Replay controls across actions and rotations; failed control must not consume nonce |
 | Atomic failed release | Reverting transfer rolls back replay flag and daily accounting | Reverting/false-returning ERC-20; callback; insufficient balance |
 | Conservation | Exact deposit delta; bounded release and available balance | Direct donations, fee/rebase tokens, self-recipient and upgradeable-token behavior |
+| Deposit limits | Per-deposit maximum, UTC-day deposit total and post-deposit balance cap checked before the transfer | Donations at and above the cap, day boundaries, limits lowered below current usage, failed deposit leaves counters unchanged |
 | Escrow terminal states | Funded precedes Activated or Cancelled; fixed recipients | Cross-terminal calls, double decisions, late transfers and failed transfer rollback |
-| Privileged authority explicit | Quorum can resume, rotate, change limits and guardian | Show that quorum can raise limits; do not model a limit as immutable loss protection |
+| Escrow timeout | Decisions only before `fundedAt + REFUND_TIMEOUT`; permissionless refund to the fixed recipient from that instant | Exact boundary second, stale long-deadline approvals after the timeout, refund after a decision, token callback and failed transfer |
+| Privileged authority explicit | Quorum can resume, rotate, change release and deposit limits, guardian and foreign-token rescue | Show that quorum can raise limits; do not model a limit as immutable loss protection |
 
 The vault does not itself prove a native-chain burn or its finality. The signer
 service and destination adapter must bind route, source-chain identity and

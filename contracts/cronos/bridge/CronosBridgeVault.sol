@@ -12,6 +12,12 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// @notice Locks canonical Cronos XTC and releases it after a quorum-signed
 ///         native Xitcoin burn attestation.
 /// @dev This contract cannot mint or burn XTC and has no owner withdrawal.
+///      Deposits are bounded by a per-deposit maximum, a daily limit and a
+///      cap on the vault's total canonical balance. These limits are meant to
+///      be configured no higher than the corresponding Xitcoin route limits
+///      (`max_transfer_amount` and `max_outstanding_amount`), so that a
+///      deposit the chain could not mint is rejected here instead of being
+///      locked.
 contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -37,6 +43,8 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
         keccak256("CHANGE_GUARDIAN");
     bytes32 public constant ACTION_RESCUE_FOREIGN_TOKEN =
         keccak256("RESCUE_FOREIGN_TOKEN");
+    bytes32 public constant ACTION_UPDATE_DEPOSIT_LIMITS =
+        keccak256("UPDATE_DEPOSIT_LIMITS");
 
     IERC20 public immutable asset;
     bytes32 public immutable routeId;
@@ -53,6 +61,18 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
     uint256 public dailyReleaseLimit;
     uint256 public releaseDay;
     uint256 public releasedToday;
+
+    /// @notice Largest amount accepted by a single deposit.
+    uint256 public maxDepositAmount;
+    /// @notice Largest total accepted by deposits within one UTC day
+    ///         (`block.timestamp / 1 days`).
+    uint256 public dailyDepositLimit;
+    /// @notice Largest canonical balance the vault may hold after a deposit.
+    /// @dev Compared with `asset.balanceOf(address(this))`, so direct
+    ///      transfers (donations) and any bootstrap reserve count toward it.
+    uint256 public maxLockedAmount;
+    uint256 public depositDay;
+    uint256 public depositedToday;
 
     mapping(bytes32 sourceBurnId => bool processed) public processedBurns;
 
@@ -73,6 +93,10 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
     error InsufficientLiquidity();
     error UnsupportedTokenBehavior();
     error CanonicalAssetRescueForbidden();
+    error InvalidDepositLimits();
+    error DepositLimitExceeded();
+    error DailyDepositLimitExceeded();
+    error LockedAmountCapExceeded();
 
     event Deposited(
         bytes32 indexed depositId,
@@ -113,6 +137,12 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
         uint256 amount,
         uint256 governanceNonce
     );
+    event DepositLimitsUpdated(
+        uint256 maxDepositAmount,
+        uint256 dailyDepositLimit,
+        uint256 maxLockedAmount,
+        uint256 governanceNonce
+    );
 
     constructor(
         IERC20 canonicalAsset,
@@ -121,18 +151,29 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
         address initialGuardian,
         uint256 initialMaxReleaseAmount,
         uint256 initialDailyReleaseLimit,
+        uint256 initialMaxDepositAmount,
+        uint256 initialDailyDepositLimit,
+        uint256 initialMaxLockedAmount,
         bool startPaused
     ) EIP712(EIP712_NAME, EIP712_VERSION) {
         if (address(canonicalAsset) == address(0)) revert InvalidAddress();
         if (canonicalRouteId == bytes32(0)) revert InvalidRoute();
         if (!_isValidRecipient(initialGuardian)) revert InvalidAddress();
         _validateLimits(initialMaxReleaseAmount, initialDailyReleaseLimit);
+        _validateDepositLimits(
+            initialMaxDepositAmount,
+            initialDailyDepositLimit,
+            initialMaxLockedAmount
+        );
 
         asset = canonicalAsset;
         routeId = canonicalRouteId;
         guardian = initialGuardian;
         maxReleaseAmount = initialMaxReleaseAmount;
         dailyReleaseLimit = initialDailyReleaseLimit;
+        maxDepositAmount = initialMaxDepositAmount;
+        dailyDepositLimit = initialDailyDepositLimit;
+        maxLockedAmount = initialMaxLockedAmount;
 
         _setSigners(initialSigners);
         signerSetVersion = 1;
@@ -150,14 +191,26 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
     }
 
     /// @notice Locks canonical Cronos XTC for a recipient on Xitcoin.
+    /// @dev Reverts if `amount` exceeds `maxDepositAmount`, if the UTC-day
+    ///      deposit total would exceed `dailyDepositLimit`, or if the vault's
+    ///      canonical balance after the deposit would exceed `maxLockedAmount`.
     function deposit(
         uint256 amount,
         address recipient
     ) external whenNotPaused nonReentrant returns (bytes32 depositId) {
         if (amount == 0) revert InvalidAmount();
         if (!_isValidRecipient(recipient)) revert InvalidAddress();
+        if (amount > maxDepositAmount) revert DepositLimitExceeded();
 
         uint256 balanceBefore = asset.balanceOf(address(this));
+        // amount <= maxDepositAmount <= maxLockedAmount, so this cannot
+        // underflow. The exact-delta check below guarantees that the balance
+        // after the transfer equals balanceBefore + amount.
+        if (balanceBefore > maxLockedAmount - amount) {
+            revert LockedAmountCapExceeded();
+        }
+        _applyDailyDepositLimit(amount);
+
         asset.safeTransferFrom(msg.sender, address(this), amount);
         uint256 balanceAfter = asset.balanceOf(address(this));
 
@@ -331,6 +384,50 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
         );
     }
 
+    /// @notice Updates per-deposit, daily deposit and total locked limits by
+    ///         signer quorum.
+    /// @dev Takes effect immediately and does not reset the current day's
+    ///      deposit total. A cap below the current balance is accepted and
+    ///      blocks deposits until releases bring the balance back under it.
+    function updateDepositLimits(
+        uint256 newMaxDepositAmount,
+        uint256 newDailyDepositLimit,
+        uint256 newMaxLockedAmount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes[] calldata signatures
+    ) external {
+        _validateDepositLimits(
+            newMaxDepositAmount,
+            newDailyDepositLimit,
+            newMaxLockedAmount
+        );
+        uint256 consumedNonce = _authorizeControl(
+            ACTION_UPDATE_DEPOSIT_LIMITS,
+            keccak256(
+                abi.encode(
+                    newMaxDepositAmount,
+                    newDailyDepositLimit,
+                    newMaxLockedAmount
+                )
+            ),
+            nonce,
+            deadline,
+            signatures
+        );
+
+        maxDepositAmount = newMaxDepositAmount;
+        dailyDepositLimit = newDailyDepositLimit;
+        maxLockedAmount = newMaxLockedAmount;
+
+        emit DepositLimitsUpdated(
+            newMaxDepositAmount,
+            newDailyDepositLimit,
+            newMaxLockedAmount,
+            consumedNonce
+        );
+    }
+
     /// @notice Changes the emergency guardian by signer quorum.
     function changeGuardian(
         address newGuardian,
@@ -457,6 +554,20 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
         releasedToday = updatedReleasedToday;
     }
 
+    function _applyDailyDepositLimit(uint256 amount) internal {
+        uint256 today = block.timestamp / 1 days;
+        if (today != depositDay) {
+            depositDay = today;
+            depositedToday = 0;
+        }
+
+        uint256 updatedDepositedToday = depositedToday + amount;
+        if (updatedDepositedToday > dailyDepositLimit) {
+            revert DailyDepositLimitExceeded();
+        }
+        depositedToday = updatedDepositedToday;
+    }
+
     function _setSigners(address[3] memory newSigners) internal {
         _validateSigners(newSigners);
 
@@ -495,6 +606,22 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
             candidateMaxReleaseAmount > candidateDailyReleaseLimit
         ) {
             revert InvalidAmount();
+        }
+    }
+
+    function _validateDepositLimits(
+        uint256 candidateMaxDepositAmount,
+        uint256 candidateDailyDepositLimit,
+        uint256 candidateMaxLockedAmount
+    ) internal pure {
+        if (
+            candidateMaxDepositAmount == 0 ||
+            candidateDailyDepositLimit == 0 ||
+            candidateMaxLockedAmount == 0 ||
+            candidateMaxDepositAmount > candidateDailyDepositLimit ||
+            candidateMaxDepositAmount > candidateMaxLockedAmount
+        ) {
+            revert InvalidDepositLimits();
         }
     }
 

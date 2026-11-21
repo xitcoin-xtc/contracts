@@ -8,6 +8,9 @@ describe('CronosBridgeVault', function () {
   const routeId = ethers.id('XTC:CRONOS:25:XITCOIN');
   const maxRelease = ethers.parseEther('100');
   const dailyLimit = ethers.parseEther('150');
+  const maxDeposit = ethers.parseEther('50');
+  const dailyDepositLimit = ethers.parseEther('120');
+  const maxLocked = ethers.parseEther('700');
   const deadAddress = '0x000000000000000000000000000000000000dEaD';
 
   let deployer;
@@ -118,6 +121,65 @@ describe('CronosBridgeVault', function () {
     };
   }
 
+  async function deployVault(overrides = {}) {
+    const Vault = await ethers.getContractFactory('CronosBridgeVault');
+    const config = {
+      maxRelease,
+      dailyLimit,
+      maxDeposit,
+      dailyDepositLimit,
+      maxLocked,
+      paused: false,
+      ...overrides
+    };
+    return Vault.deploy(
+      await token.getAddress(),
+      routeId,
+      [signerOne.address, signerTwo.address, signerThree.address],
+      guardian.address,
+      config.maxRelease,
+      config.dailyLimit,
+      config.maxDeposit,
+      config.dailyDepositLimit,
+      config.maxLocked,
+      config.paused
+    );
+  }
+
+  function depositLimitsPayload(maximum, daily, locked) {
+    return ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'uint256', 'uint256'],
+        [maximum, daily, locked]
+      )
+    );
+  }
+
+  async function nextTimestamp(timestamp) {
+    await ethers.provider.send('evm_setNextBlockTimestamp', [Number(timestamp)]);
+  }
+
+  async function latestTimestamp() {
+    return BigInt((await ethers.provider.getBlock('latest')).timestamp);
+  }
+
+  async function approveAndDeposit(amount, options = {}) {
+    await token.connect(user).approve(await vault.getAddress(), amount);
+    return vault.connect(user).deposit(amount, recipient.address, options);
+  }
+
+  async function releaseSigned(sourceBurnId, amount) {
+    const signed = await signRelease({ sourceBurnId, amount });
+    return vault.release(
+      sourceBurnId,
+      recipient.address,
+      amount,
+      1,
+      signed.expiry,
+      signed.signatures
+    );
+  }
+
   beforeEach(async function () {
     [
       deployer,
@@ -144,6 +206,9 @@ describe('CronosBridgeVault', function () {
       guardian.address,
       maxRelease,
       dailyLimit,
+      maxDeposit,
+      dailyDepositLimit,
+      maxLocked,
       false
     );
 
@@ -164,6 +229,37 @@ describe('CronosBridgeVault', function () {
       expect(await vault.guardian()).to.equal(guardian.address);
       expect(await vault.maxReleaseAmount()).to.equal(maxRelease);
       expect(await vault.dailyReleaseLimit()).to.equal(dailyLimit);
+      expect(await vault.maxDepositAmount()).to.equal(maxDeposit);
+      expect(await vault.dailyDepositLimit()).to.equal(dailyDepositLimit);
+      expect(await vault.maxLockedAmount()).to.equal(maxLocked);
+      expect(await vault.depositDay()).to.equal(0n);
+      expect(await vault.depositedToday()).to.equal(0n);
+    });
+
+    it('rejects zero and inconsistent deposit limits', async function () {
+      const invalid = [
+        { maxDeposit: 0n },
+        { dailyDepositLimit: 0n },
+        { maxLocked: 0n },
+        { maxDeposit: dailyDepositLimit + 1n },
+        { maxDeposit: ethers.parseEther('60'), maxLocked: ethers.parseEther('59') }
+      ];
+      for (const overrides of invalid) {
+        await expect(deployVault(overrides))
+          .to.be.revertedWithCustomError(vault, 'InvalidDepositLimits');
+      }
+    });
+
+    it('accepts equal per-deposit, daily and locked limits', async function () {
+      const limit = ethers.parseEther('5');
+      const equalLimits = await deployVault({
+        maxDeposit: limit,
+        dailyDepositLimit: limit,
+        maxLocked: limit
+      });
+      expect(await equalLimits.maxDepositAmount()).to.equal(limit);
+      expect(await equalLimits.dailyDepositLimit()).to.equal(limit);
+      expect(await equalLimits.maxLockedAmount()).to.equal(limit);
     });
 
     it('rejects duplicate signers', async function () {
@@ -176,6 +272,9 @@ describe('CronosBridgeVault', function () {
           guardian.address,
           maxRelease,
           dailyLimit,
+          maxDeposit,
+          dailyDepositLimit,
+          maxLocked,
           false
         )
       ).to.be.revertedWithCustomError(vault, 'InvalidSignerSet');
@@ -191,6 +290,9 @@ describe('CronosBridgeVault', function () {
           guardian.address,
           dailyLimit + 1n,
           dailyLimit,
+          maxDeposit,
+          dailyDepositLimit,
+          maxLocked,
           false
         )
       ).to.be.revertedWithCustomError(vault, 'InvalidAmount');
@@ -418,6 +520,9 @@ describe('CronosBridgeVault', function () {
         guardian.address,
         maxRelease,
         dailyLimit,
+        maxDeposit,
+        dailyDepositLimit,
+        maxLocked,
         false
       );
       await token.mint(await secondVault.getAddress(), ethers.parseEther('20'));
@@ -557,6 +662,329 @@ describe('CronosBridgeVault', function () {
       await expect(
         vault.resume(resume.nonce, resume.expiry, resume.signatures)
       ).to.be.revertedWithCustomError(vault, 'InvalidNonce');
+    });
+  });
+
+  describe('deposit limits', function () {
+    it('accepts exactly the per-deposit maximum and rejects one unit more', async function () {
+      await token.connect(user).approve(await vault.getAddress(), maxDeposit + 1n);
+      await expect(
+        vault.connect(user).deposit(maxDeposit + 1n, recipient.address)
+      ).to.be.revertedWithCustomError(vault, 'DepositLimitExceeded');
+      expect(await vault.depositNonce()).to.equal(0n);
+
+      await expect(vault.connect(user).deposit(maxDeposit, recipient.address))
+        .to.emit(vault, 'Deposited');
+      expect(await vault.depositedToday()).to.equal(maxDeposit);
+    });
+
+    it('enforces the daily deposit limit and resets it at the next UTC day', async function () {
+      const day = 86400n;
+      const today = (await latestTimestamp()) / day + 1n;
+      const dayStart = today * day;
+
+      await nextTimestamp(dayStart);
+      await approveAndDeposit(maxDeposit);
+      await approveAndDeposit(maxDeposit);
+      const remaining = dailyDepositLimit - 2n * maxDeposit;
+
+      await token.connect(user).approve(await vault.getAddress(), remaining + 1n);
+      await expect(
+        vault.connect(user).deposit(remaining + 1n, recipient.address)
+      ).to.be.revertedWithCustomError(vault, 'DailyDepositLimitExceeded');
+      expect(await vault.depositedToday()).to.equal(2n * maxDeposit);
+      expect(await vault.depositNonce()).to.equal(2n);
+
+      await vault.connect(user).deposit(remaining, recipient.address);
+      expect(await vault.depositedToday()).to.equal(dailyDepositLimit);
+      expect(await vault.depositDay()).to.equal(today);
+
+      // Last second of the same UTC day: still the same bucket.
+      await token.connect(user).approve(await vault.getAddress(), 1n);
+      await nextTimestamp(dayStart + day - 1n);
+      await expect(
+        vault.connect(user).deposit(1n, recipient.address, { gasLimit: 500000 })
+      ).to.be.revertedWithCustomError(vault, 'DailyDepositLimitExceeded');
+
+      // First second of the next UTC day: a new bucket.
+      await nextTimestamp(dayStart + day);
+      await vault.connect(user).deposit(1n, recipient.address, { gasLimit: 500000 });
+      expect(await vault.depositDay()).to.equal(today + 1n);
+      expect(await vault.depositedToday()).to.equal(1n);
+    });
+
+    it('counts direct donations toward the locked cap', async function () {
+      const vaultAddress = await vault.getAddress();
+      // 500 seeded + 150 donated = 650; the cap is 700.
+      await token.mint(outsider.address, ethers.parseEther('150'));
+      await token.connect(outsider).transfer(vaultAddress, ethers.parseEther('150'));
+
+      await token.connect(user).approve(vaultAddress, maxDeposit + 1n);
+      await expect(vault.connect(user).deposit(maxDeposit, recipient.address))
+        .to.emit(vault, 'Deposited');
+      expect(await token.balanceOf(vaultAddress)).to.equal(maxLocked);
+
+      await expect(
+        vault.connect(user).deposit(1n, recipient.address)
+      ).to.be.revertedWithCustomError(vault, 'LockedAmountCapExceeded');
+      expect(await vault.depositedToday()).to.equal(maxDeposit);
+      expect(await vault.depositNonce()).to.equal(1n);
+    });
+
+    it('rejects every deposit while donations keep the balance above the cap', async function () {
+      const vaultAddress = await vault.getAddress();
+      await token.mint(vaultAddress, ethers.parseEther('300'));
+      expect(await token.balanceOf(vaultAddress)).to.be.greaterThan(maxLocked);
+
+      await token.connect(user).approve(vaultAddress, 1n);
+      await expect(
+        vault.connect(user).deposit(1n, recipient.address)
+      ).to.be.revertedWithCustomError(vault, 'LockedAmountCapExceeded');
+
+      // Releases reduce the balance and reopen deposit capacity.
+      await releaseSigned(ethers.id('cap-release-one'), maxRelease);
+      await releaseSigned(ethers.id('cap-release-two'), ethers.parseEther('10'));
+      expect(await token.balanceOf(vaultAddress)).to.equal(ethers.parseEther('690'));
+      await vault.connect(user).deposit(1n, recipient.address);
+    });
+
+    it('rejects deposits while paused without touching accounting', async function () {
+      await vault.connect(guardian).pause();
+      await token.connect(user).approve(await vault.getAddress(), 1n);
+      await expect(
+        vault.connect(user).deposit(1n, recipient.address)
+      ).to.be.revertedWithCustomError(vault, 'EnforcedPause');
+      expect(await vault.depositedToday()).to.equal(0n);
+      expect(await vault.depositNonce()).to.equal(0n);
+    });
+  });
+
+  describe('deposit limit governance', function () {
+    const newMaximum = ethers.parseEther('80');
+    const newDaily = ethers.parseEther('200');
+    const newLocked = ethers.parseEther('900');
+
+    it('updates deposit limits only after a valid quorum action', async function () {
+      const action = await vault.ACTION_UPDATE_DEPOSIT_LIMITS();
+      expect(action).to.equal(ethers.id('UPDATE_DEPOSIT_LIMITS'));
+      const control = await signControl({
+        action,
+        payloadHash: depositLimitsPayload(newMaximum, newDaily, newLocked)
+      });
+
+      await expect(
+        vault.connect(outsider).updateDepositLimits(
+          newMaximum,
+          newDaily,
+          newLocked,
+          control.nonce,
+          control.expiry,
+          control.signatures
+        )
+      )
+        .to.emit(vault, 'DepositLimitsUpdated')
+        .withArgs(newMaximum, newDaily, newLocked, 0n);
+
+      expect(await vault.maxDepositAmount()).to.equal(newMaximum);
+      expect(await vault.dailyDepositLimit()).to.equal(newDaily);
+      expect(await vault.maxLockedAmount()).to.equal(newLocked);
+      expect(await vault.governanceNonce()).to.equal(1n);
+      // Release limits are independent.
+      expect(await vault.maxReleaseAmount()).to.equal(maxRelease);
+      expect(await vault.dailyReleaseLimit()).to.equal(dailyLimit);
+
+      await token.connect(user).approve(await vault.getAddress(), newMaximum);
+      await vault.connect(user).deposit(newMaximum, recipient.address);
+      expect(await vault.depositedToday()).to.equal(newMaximum);
+
+      await expect(
+        vault.updateDepositLimits(
+          newMaximum,
+          newDaily,
+          newLocked,
+          control.nonce,
+          control.expiry,
+          control.signatures
+        )
+      ).to.be.revertedWithCustomError(vault, 'InvalidNonce');
+    });
+
+    it('rejects insufficient, duplicate, outsider and expired approvals', async function () {
+      const action = await vault.ACTION_UPDATE_DEPOSIT_LIMITS();
+      const payloadHash = depositLimitsPayload(newMaximum, newDaily, newLocked);
+
+      const one = await signControl({ action, payloadHash, signers: [signerOne] });
+      await expect(
+        vault.updateDepositLimits(newMaximum, newDaily, newLocked, one.nonce, one.expiry, one.signatures)
+      ).to.be.revertedWithCustomError(vault, 'InsufficientSignatures');
+      await expect(
+        vault.updateDepositLimits(
+          newMaximum,
+          newDaily,
+          newLocked,
+          one.nonce,
+          one.expiry,
+          [one.signatures[0], one.signatures[0]]
+        )
+      ).to.be.revertedWithCustomError(vault, 'DuplicateSignature');
+
+      const outsiderApproval = await signControl({
+        action,
+        payloadHash,
+        signers: [signerOne, outsider]
+      });
+      await expect(
+        vault.updateDepositLimits(
+          newMaximum,
+          newDaily,
+          newLocked,
+          outsiderApproval.nonce,
+          outsiderApproval.expiry,
+          outsiderApproval.signatures
+        )
+      ).to.be.revertedWithCustomError(vault, 'UnauthorizedSigner');
+
+      const expired = await signControl({ action, payloadHash, expires: 1n });
+      await expect(
+        vault.updateDepositLimits(
+          newMaximum,
+          newDaily,
+          newLocked,
+          expired.nonce,
+          expired.expiry,
+          expired.signatures
+        )
+      ).to.be.revertedWithCustomError(vault, 'SignatureExpired');
+
+      expect(await vault.governanceNonce()).to.equal(0n);
+      expect(await vault.maxDepositAmount()).to.equal(maxDeposit);
+    });
+
+    it('binds approval to every limit value and to the action', async function () {
+      const action = await vault.ACTION_UPDATE_DEPOSIT_LIMITS();
+      const control = await signControl({
+        action,
+        payloadHash: depositLimitsPayload(newMaximum, newDaily, newLocked)
+      });
+      const mutations = [
+        [newMaximum + 1n, newDaily, newLocked],
+        [newMaximum, newDaily + 1n, newLocked],
+        [newMaximum, newDaily, newLocked + 1n]
+      ];
+      for (const [maximum, daily, locked] of mutations) {
+        await expect(
+          vault.updateDepositLimits(maximum, daily, locked, control.nonce, control.expiry, control.signatures)
+        ).to.be.revertedWithCustomError(vault, 'UnauthorizedSigner');
+      }
+
+      // A release-limit approval over the same payload hash is not reusable.
+      const otherAction = await signControl({
+        action: await vault.ACTION_UPDATE_LIMITS(),
+        payloadHash: depositLimitsPayload(newMaximum, newDaily, newLocked)
+      });
+      await expect(
+        vault.updateDepositLimits(
+          newMaximum,
+          newDaily,
+          newLocked,
+          otherAction.nonce,
+          otherAction.expiry,
+          otherAction.signatures
+        )
+      ).to.be.revertedWithCustomError(vault, 'UnauthorizedSigner');
+      expect(await vault.governanceNonce()).to.equal(0n);
+    });
+
+    it('rejects invalid limit values without consuming the nonce', async function () {
+      const action = await vault.ACTION_UPDATE_DEPOSIT_LIMITS();
+      const invalid = [
+        [0n, newDaily, newLocked],
+        [newMaximum, 0n, newLocked],
+        [newMaximum, newDaily, 0n],
+        [newDaily + 1n, newDaily, newLocked],
+        [newMaximum, newDaily, newMaximum - 1n]
+      ];
+      for (const [maximum, daily, locked] of invalid) {
+        const control = await signControl({
+          action,
+          payloadHash: depositLimitsPayload(maximum, daily, locked)
+        });
+        await expect(
+          vault.updateDepositLimits(maximum, daily, locked, control.nonce, control.expiry, control.signatures)
+        ).to.be.revertedWithCustomError(vault, 'InvalidDepositLimits');
+      }
+      expect(await vault.governanceNonce()).to.equal(0n);
+    });
+
+    it('rejects approvals from a rotated-out signer set', async function () {
+      const action = await vault.ACTION_UPDATE_DEPOSIT_LIMITS();
+      const payloadHash = depositLimitsPayload(newMaximum, newDaily, newLocked);
+      const staleApproval = await signControl({ action, payloadHash, nonce: 1n, version: 1n });
+
+      const newSigners = [replacementOne.address, replacementTwo.address, replacementThree.address];
+      const rotation = await signControl({
+        action: await vault.ACTION_ROTATE_SIGNERS(),
+        payloadHash: ethers.keccak256(
+          ethers.AbiCoder.defaultAbiCoder().encode(['address[3]'], [newSigners])
+        )
+      });
+      await vault.rotateSigners(newSigners, rotation.nonce, rotation.expiry, rotation.signatures);
+
+      await expect(
+        vault.updateDepositLimits(
+          newMaximum,
+          newDaily,
+          newLocked,
+          staleApproval.nonce,
+          staleApproval.expiry,
+          staleApproval.signatures
+        )
+      ).to.be.revertedWithCustomError(vault, 'UnauthorizedSigner');
+
+      const freshApproval = await signControl({
+        action,
+        payloadHash,
+        signers: [replacementOne, replacementThree]
+      });
+      await vault.updateDepositLimits(
+        newMaximum,
+        newDaily,
+        newLocked,
+        freshApproval.nonce,
+        freshApproval.expiry,
+        freshApproval.signatures
+      );
+      expect(await vault.maxLockedAmount()).to.equal(newLocked);
+      expect(await vault.governanceNonce()).to.equal(2n);
+    });
+
+    it('keeps the day total and lets a cap below the balance stop deposits only', async function () {
+      await approveAndDeposit(ethers.parseEther('40'));
+      const loweredMaximum = ethers.parseEther('10');
+      const loweredDaily = ethers.parseEther('45');
+      const loweredLocked = ethers.parseEther('100');
+      const control = await signControl({
+        action: await vault.ACTION_UPDATE_DEPOSIT_LIMITS(),
+        payloadHash: depositLimitsPayload(loweredMaximum, loweredDaily, loweredLocked)
+      });
+      await vault.updateDepositLimits(
+        loweredMaximum,
+        loweredDaily,
+        loweredLocked,
+        control.nonce,
+        control.expiry,
+        control.signatures
+      );
+      expect(await vault.depositedToday()).to.equal(ethers.parseEther('40'));
+
+      await token.connect(user).approve(await vault.getAddress(), 1n);
+      await expect(
+        vault.connect(user).deposit(1n, recipient.address)
+      ).to.be.revertedWithCustomError(vault, 'LockedAmountCapExceeded');
+
+      // Releases are not affected by deposit limits.
+      await releaseSigned(ethers.id('after-lowered-cap'), ethers.parseEther('10'));
+      expect(await token.balanceOf(recipient.address)).to.equal(ethers.parseEther('10'));
     });
   });
 

@@ -56,6 +56,15 @@ export function validateCronosTestnetPlan(input) {
   if (maxReleaseAmount > dailyReleaseLimit) {
     throw new Error('maximum release amount must not exceed the daily limit');
   }
+  const maxDepositAmount = amount(input.maxDepositAmount, 'maximum deposit amount');
+  const dailyDepositLimit = amount(input.dailyDepositLimit, 'daily deposit limit');
+  const maxLockedAmount = amount(input.maxLockedAmount, 'maximum locked amount');
+  if (maxDepositAmount > dailyDepositLimit) {
+    throw new Error('maximum deposit amount must not exceed the daily deposit limit');
+  }
+  if (maxDepositAmount > maxLockedAmount) {
+    throw new Error('maximum deposit amount must not exceed the maximum locked amount');
+  }
   return Object.freeze({
     chainId,
     routeLabel: TESTNET_ROUTE_LABEL,
@@ -65,6 +74,9 @@ export function validateCronosTestnetPlan(input) {
     tokenRecipient,
     tokenSupply,
     maxReleaseAmount,
-    dailyReleaseLimit
+    dailyReleaseLimit,
+    maxDepositAmount,
+    dailyDepositLimit,
+    maxLockedAmount
   });
 }

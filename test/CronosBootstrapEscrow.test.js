@@ -91,6 +91,13 @@ describe('CronosBootstrapEscrow', function () {
       .withArgs(fundingAccount.address, expectedAmount);
   }
 
+  async function nextTimestamp(timestamp) {
+    await ethers.provider.send('evm_setNextBlockTimestamp', [Number(timestamp)]);
+  }
+
+  // Explicit gas avoids estimating against a block other than the one mined.
+  const mined = { gasLimit: 1000000 };
+
   it('accepts the exact reserve only from the fixed funding account', async function () {
     await expect(escrow.connect(outsider).fund())
       .to.be.revertedWithCustomError(escrow, 'UnauthorizedFunder');
@@ -201,6 +208,204 @@ describe('CronosBootstrapEscrow', function () {
     const expired = await decisionSignatures(await escrow.ACTION_ACTIVATE(), { expiry: 1n });
     await expect(escrow.activate(expired.nonce, expired.expiry, expired.signatures))
       .to.be.revertedWithCustomError(escrow, 'SignatureExpired');
+  });
+
+  describe('timeout refund', function () {
+    let timeout;
+    let fundedAt;
+
+    beforeEach(async function () {
+      timeout = await escrow.REFUND_TIMEOUT();
+      expect(await escrow.fundedAt()).to.equal(0n);
+      expect(await escrow.refundAvailableAt()).to.equal(0n);
+      await fund();
+      fundedAt = await escrow.fundedAt();
+    });
+
+    async function longLivedDecision(action) {
+      return decisionSignatures(action, { expiry: fundedAt + timeout + 86400n });
+    }
+
+    it('uses a fixed 180-day delay from the recorded funding time', async function () {
+      const block = await ethers.provider.getBlock('latest');
+      expect(timeout).to.equal(180n * 86400n);
+      expect(fundedAt).to.equal(BigInt(block.timestamp));
+      expect(await escrow.refundAvailableAt()).to.equal(fundedAt + timeout);
+    });
+
+    it('cannot refund before funding', async function () {
+      const Escrow = await ethers.getContractFactory('CronosBootstrapEscrow');
+      const unfunded = await Escrow.deploy(
+        await token.getAddress(),
+        permanentVault.address,
+        refundRecipient.address,
+        fundingAccount.address,
+        genesisHash,
+        expectedAmount,
+        [signerOne.address, signerTwo.address, signerThree.address]
+      );
+      await expect(unfunded.refundAfterTimeout())
+        .to.be.revertedWithCustomError(unfunded, 'InvalidState');
+    });
+
+    it('rejects a refund one second before the timeout', async function () {
+      await nextTimestamp(fundedAt + timeout - 1n);
+      await expect(escrow.connect(outsider).refundAfterTimeout(mined))
+        .to.be.revertedWithCustomError(escrow, 'RefundTimeoutNotReached');
+      expect(await escrow.state()).to.equal(1n);
+      expect(await token.balanceOf(await escrow.getAddress())).to.equal(expectedAmount);
+    });
+
+    it('still allows activation one second before the timeout', async function () {
+      const approval = await longLivedDecision(await escrow.ACTION_ACTIVATE());
+      await nextTimestamp(fundedAt + timeout - 1n);
+      await escrow.activate(approval.nonce, approval.expiry, approval.signatures, mined);
+      expect(await escrow.state()).to.equal(2n);
+      await expect(escrow.refundAfterTimeout())
+        .to.be.revertedWithCustomError(escrow, 'InvalidState');
+    });
+
+    it('still allows cancellation one second before the timeout', async function () {
+      const approval = await longLivedDecision(await escrow.ACTION_CANCEL());
+      await nextTimestamp(fundedAt + timeout - 1n);
+      await escrow.cancel(approval.nonce, approval.expiry, approval.signatures, mined);
+      expect(await escrow.state()).to.equal(3n);
+      await expect(escrow.refundAfterTimeout())
+        .to.be.revertedWithCustomError(escrow, 'InvalidState');
+    });
+
+    it('lets anyone refund the whole balance to the fixed recipient at the timeout', async function () {
+      const dust = 11n;
+      await token.mint(outsider.address, dust);
+      await token.connect(outsider).transfer(await escrow.getAddress(), dust);
+
+      await nextTimestamp(fundedAt + timeout);
+      await expect(escrow.connect(outsider).refundAfterTimeout(mined))
+        .to.emit(escrow, 'BootstrapRefundedAfterTimeout')
+        .withArgs(refundRecipient.address, expectedAmount + dust, genesisHash, outsider.address);
+
+      expect(await escrow.state()).to.equal(3n);
+      expect(await token.balanceOf(refundRecipient.address)).to.equal(expectedAmount + dust);
+      expect(await token.balanceOf(permanentVault.address)).to.equal(0n);
+      expect(await token.balanceOf(await escrow.getAddress())).to.equal(0n);
+      expect(await token.balanceOf(outsider.address)).to.equal(0n);
+
+      await expect(escrow.refundAfterTimeout())
+        .to.be.revertedWithCustomError(escrow, 'InvalidState');
+    });
+
+    it('rejects activation and cancellation once the timeout has elapsed', async function () {
+      const activation = await longLivedDecision(await escrow.ACTION_ACTIVATE());
+      await nextTimestamp(fundedAt + timeout);
+      await expect(
+        escrow.activate(activation.nonce, activation.expiry, activation.signatures, mined)
+      ).to.be.revertedWithCustomError(escrow, 'RefundTimeoutElapsed');
+
+      const cancellation = await longLivedDecision(await escrow.ACTION_CANCEL());
+      await expect(
+        escrow.cancel(cancellation.nonce, cancellation.expiry, cancellation.signatures)
+      ).to.be.revertedWithCustomError(escrow, 'RefundTimeoutElapsed');
+
+      expect(await escrow.state()).to.equal(1n);
+      expect(await escrow.decisionNonce()).to.equal(0n);
+      expect(await token.balanceOf(await escrow.getAddress())).to.equal(expectedAmount);
+    });
+
+    it('rejects activation and cancellation after a timeout refund', async function () {
+      const activation = await longLivedDecision(await escrow.ACTION_ACTIVATE());
+      const cancellation = await longLivedDecision(await escrow.ACTION_CANCEL());
+      await nextTimestamp(fundedAt + timeout);
+      await escrow.refundAfterTimeout(mined);
+
+      await expect(
+        escrow.activate(activation.nonce, activation.expiry, activation.signatures)
+      ).to.be.revertedWithCustomError(escrow, 'InvalidState');
+      await expect(
+        escrow.cancel(cancellation.nonce, cancellation.expiry, cancellation.signatures)
+      ).to.be.revertedWithCustomError(escrow, 'InvalidState');
+      expect(await token.balanceOf(permanentVault.address)).to.equal(0n);
+    });
+
+    it('cannot refund after activation, even after the timeout', async function () {
+      const approval = await decisionSignatures(await escrow.ACTION_ACTIVATE());
+      await escrow.activate(approval.nonce, approval.expiry, approval.signatures);
+      await nextTimestamp(fundedAt + timeout + 1n);
+      await expect(escrow.refundAfterTimeout(mined))
+        .to.be.revertedWithCustomError(escrow, 'InvalidState');
+      expect(await token.balanceOf(permanentVault.address)).to.equal(expectedAmount);
+      expect(await token.balanceOf(refundRecipient.address)).to.equal(0n);
+    });
+
+    it('cannot refund a second time after cancellation, even after the timeout', async function () {
+      const approval = await decisionSignatures(await escrow.ACTION_CANCEL());
+      await escrow.cancel(approval.nonce, approval.expiry, approval.signatures);
+      await nextTimestamp(fundedAt + timeout + 1n);
+      await expect(escrow.refundAfterTimeout(mined))
+        .to.be.revertedWithCustomError(escrow, 'InvalidState');
+      expect(await token.balanceOf(refundRecipient.address)).to.equal(expectedAmount);
+    });
+
+    it('forwards later direct transfers to the refund recipient after a timeout refund', async function () {
+      await nextTimestamp(fundedAt + timeout);
+      await escrow.refundAfterTimeout(mined);
+
+      const lateAmount = ethers.parseEther('2');
+      await token.mint(outsider.address, lateAmount);
+      await token.connect(outsider).transfer(await escrow.getAddress(), lateAmount);
+
+      await expect(escrow.connect(outsider).forwardTerminalBalance())
+        .to.emit(escrow, 'TerminalBalanceForwarded')
+        .withArgs(refundRecipient.address, lateAmount, 3n);
+      expect(await token.balanceOf(refundRecipient.address)).to.equal(expectedAmount + lateAmount);
+      expect(await token.balanceOf(permanentVault.address)).to.equal(0n);
+    });
+  });
+
+  describe('timeout refund with a nonstandard token', function () {
+    let adversarial;
+    let guarded;
+
+    beforeEach(async function () {
+      const Adversarial = await ethers.getContractFactory('AdversarialERC20');
+      adversarial = await Adversarial.deploy();
+      const Escrow = await ethers.getContractFactory('CronosBootstrapEscrow');
+      guarded = await Escrow.deploy(
+        await adversarial.getAddress(),
+        permanentVault.address,
+        refundRecipient.address,
+        fundingAccount.address,
+        genesisHash,
+        expectedAmount,
+        [signerOne.address, signerTwo.address, signerThree.address]
+      );
+      await adversarial.mint(fundingAccount.address, expectedAmount);
+      await adversarial.connect(fundingAccount).approve(await guarded.getAddress(), expectedAmount);
+      await guarded.connect(fundingAccount).fund();
+      const fundedAt = await guarded.fundedAt();
+      await ethers.provider.send('evm_setNextBlockTimestamp', [
+        Number(fundedAt + await guarded.REFUND_TIMEOUT())
+      ]);
+      await ethers.provider.send('evm_mine', []);
+    });
+
+    it('blocks reentry from a token callback', async function () {
+      const reenter = guarded.interface.encodeFunctionData('refundAfterTimeout');
+      await adversarial.configure(3, await guarded.getAddress(), reenter);
+      await guarded.refundAfterTimeout();
+      expect(await adversarial.callbackSucceeded()).to.equal(false);
+      expect(await guarded.state()).to.equal(3n);
+      expect(await adversarial.balanceOf(refundRecipient.address)).to.equal(expectedAmount);
+    });
+
+    it('rolls back the state change when the token transfer fails', async function () {
+      await adversarial.configure(4, ethers.ZeroAddress, '0x');
+      await expect(guarded.refundAfterTimeout()).to.be.revertedWithCustomError(
+        guarded,
+        'SafeERC20FailedOperation'
+      );
+      expect(await guarded.state()).to.equal(1n);
+      expect(await adversarial.balanceOf(await guarded.getAddress())).to.equal(expectedAmount);
+    });
   });
 
   it('cannot decide before the complete reserve is funded', async function () {

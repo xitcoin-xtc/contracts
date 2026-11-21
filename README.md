@@ -34,9 +34,11 @@ Since V4 the token returns `XTC` from `symbol()` (it returned `$XTC` before 1 Oc
 
 The native XTC asset on Xitcoin EVM is implemented by the chain. It is not an ERC-20 deployment in this repository.
 
-`contracts/cronos/bridge/CronosBridgeVault.sol` contains the Cronos custody side of the canonical XTC route. It accepts voluntary XTC deposits and releases locked XTC only after a two-of-three EIP-712 approval representing a native Xitcoin burn. Source publication does not identify a deployment; canonical addresses are added to `deployments/` only after deployment and verification.
+`contracts/cronos/bridge/CronosBridgeVault.sol` contains the Cronos custody side of the canonical XTC route. It accepts voluntary XTC deposits within a per-deposit maximum, a daily deposit limit and a cap on the total locked balance, and releases locked XTC only after a two-of-three EIP-712 approval representing a native Xitcoin burn, within per-release and daily release limits. A guardian can pause; every other control action needs the same two-of-three signer quorum. Source publication does not identify a deployment; canonical addresses are added to `deployments/` only after deployment and verification. No bridge vault or escrow is deployed on Cronos mainnet; the testnet vault recorded in `deployments/cronos-testnet.json` predates the deposit limits.
 
-The vault security model and verification procedure are documented in [`docs/BRIDGE_VAULT.md`](docs/BRIDGE_VAULT.md).
+`contracts/cronos/bridge/CronosBootstrapEscrow.sol` holds the one-time bootstrap reserve until a two-of-three quorum activates (moves it to the permanent vault) or cancels (refunds it to a fixed recipient). If neither happens within 180 days of funding, anyone can refund it to that fixed recipient. Keeping the Xitcoin network private until activation is an operational procedure that no contract enforces.
+
+The vault security model, roles, limits and verification procedure are documented in [`docs/BRIDGE_VAULT.md`](docs/BRIDGE_VAULT.md), the escrow in [`docs/BOOTSTRAP_ESCROW.md`](docs/BOOTSTRAP_ESCROW.md). Governance changes under consideration (not implemented) are listed in [`docs/GOVERNANCE_PROPOSAL.md`](docs/GOVERNANCE_PROPOSAL.md).
 
 ## Audit and external verification
 
