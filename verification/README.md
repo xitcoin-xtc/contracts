@@ -6,7 +6,7 @@ This directory indexes stable third-party verification records for Xitcoin. Smar
 
 - Profile: [XITCOIN on Cyberscope](https://www.cyberscope.io/audits/1-xtc)
 - Cronos contract displayed by Cyberscope: `0xE45FE733BC8617FA6DAC8437FC44B5FFFA949991`
-- Audited source and exact SHA-256 scope: [`audits/cyberscope-v2.md`](../audits/cyberscope-v2.md)
+- Audited source and exact SHA-256 scope: [`audits/cyberscope-v4.md`](../audits/cyberscope-v4.md) (current V4), [`audits/cyberscope-v2.md`](../audits/cyberscope-v2.md) (V3)
 
 The profile contains live scores, rankings and audience statistics maintained by Cyberscope. Those mutable values are not duplicated here.
 
