@@ -1,4 +1,6 @@
-# Cyberscope audit — Xitcoin V2
+# Cyberscope audit — XTC implementation V3 (replaced on 1 October 2026)
+
+V3 was the live implementation from 18 February to 1 October 2026. The current implementation is V4: see [`cyberscope-v4.md`](cyberscope-v4.md).
 
 ## Official record
 
@@ -35,7 +37,7 @@ This audit record covers only the source identified by the SHA-256 above. It doe
 - the Xitcoin Proof-of-Stake chain;
 - validator or explorer infrastructure;
 - a bridge implementation;
-- future V2 implementations or proxy upgrades.
+- later implementations (V4 has its own record).
 
 After any proxy upgrade, verify the active implementation address and source hash before relying on this audit record.
 
@@ -43,7 +45,7 @@ After any proxy upgrade, verify the active implementation address and source has
 
 ```bash
 sha256sum contracts/cronos/v2/XTCV2.sol
-jq -r '.contracts.v2 | .proxy, .implementation, .source_sha256' deployments/cronos.json
+jq -r '.contracts.xtc.previous_implementations[0] | .address, .source_sha256' deployments/cronos.json
 ```
 
 Expected source hash:

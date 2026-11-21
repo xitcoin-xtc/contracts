@@ -11,7 +11,7 @@ The vault does not mint or burn the Cronos token. Sending XTC to a dead address 
 
 ## Canonical asset
 
-Production construction must use the Xitcoin V2 proxy, not its implementation address:
+Production construction must use the XTC proxy, not its implementation address:
 
 ```text
 0xE45FE733BC8617FA6DAC8437FC44B5FFFA949991
@@ -56,7 +56,7 @@ The package lock is authoritative. Do not apply an automated breaking dependency
 
 Deployment is a separate reviewed operation. Before any Cronos transaction:
 
-1. confirm the canonical V2 proxy from `deployments/cronos.json` and the Cronos Explorer;
+1. confirm the canonical XTC proxy from `deployments/cronos.json` and the Cronos Explorer;
 2. define three distinct bridge signer addresses and a separate guardian;
 3. define conservative initial release limits;
 4. derive and record the route identifier;

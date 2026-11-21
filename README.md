@@ -6,19 +6,23 @@ Canonical source, deployment, security and ecosystem references for Xitcoin smar
 
 | Component | Address | Decimals | Purpose |
 |---|---|---:|---|
-| Xitcoin V1 | `0xDD646291D2fff52c75F27CCDAdD0D4C2A24f37Dd` | 8 | Legacy fixed-supply token |
-| Xitcoin V2 proxy | `0xE45FE733BC8617FA6DAC8437FC44B5FFFA949991` | 18 | Current upgradeable token entry point |
-| Xitcoin V2 implementation | `0x6c171952999421F0DA00E14F97B9C2DfBE71D8A0` | 18 | Current proxy implementation |
-| Migration | `0x5A570197e4835d0c2F2F956026981E0cff50A8c9` | — | Converts V1 units to V2 units |
+| Old Xitcoin (V1) | `0xDD646291D2fff52c75F27CCDAdD0D4C2A24f37Dd` | 8 | Legacy fixed-supply token |
+| XTC proxy | `0xE45FE733BC8617FA6DAC8437FC44B5FFFA949991` | 18 | The XTC token: the address to use |
+| XTC implementation V4 | `0x3F4e9e3b1B4317674AF9C87d69ECA25c76E4a8B5` | 18 | Current implementation, live since 1 October 2026 |
+| Governance timelock | `0x33221850aDC263Ea61cF64662CDa2E7D654eD409` | — | Owner of the XTC proxy, 48-hour minimum delay |
+| Xitcoin Safe | `0xA18A28A79c2B0b67c8cF37FfF863EbaD75B02945` | — | 2-of-3 multisig that runs the timelock |
+| Migration | `0x5A570197e4835d0c2F2F956026981E0cff50A8c9` | — | Converts Old Xitcoin units to XTC |
 
-Use the proxy address for integrations with Xitcoin V2. The machine-readable deployment registry is [`deployments/cronos.json`](deployments/cronos.json).
+Earlier implementations: V3 `0x6c171952999421F0DA00E14F97B9C2DfBE71D8A0` (18 February to 1 October 2026), V2 `0xDBCd79A3651C2E0d9ae8736F4652516FAecd5bc7` (July 2025 to February 2026).
 
-The deployed Cronos V2 contract returns `$XTC` from `symbol()`. The public notation and the native Xitcoin blockchain symbol are `XTC`; the native atomic denomination is `axtc`. See [`ecosystem/README.md`](ecosystem/README.md) for the integration distinction.
+Use the proxy address for every integration. The machine-readable deployment registry is [`deployments/cronos.json`](deployments/cronos.json).
+
+Since V4 the token returns `XTC` from `symbol()` (it returned `$XTC` before 1 October 2026). The native Xitcoin blockchain uses the same symbol `XTC`; its atomic denomination is `axtc`. See [`ecosystem/README.md`](ecosystem/README.md) for the integration distinction.
 
 ## Repository layout
 
 - `contracts/cronos/v1/`: verified V1 source;
-- `contracts/cronos/v2/`: verified V2 implementation source;
+- `contracts/cronos/v2/`: verified V3 implementation source (historical folder name);
 - `contracts/cronos/migration/`: verified migration source;
 - `contracts/cronos/bridge/`: reviewed bridge custody candidates;
 - `deployments/`: canonical network and contract registry;
@@ -26,7 +30,7 @@ The deployed Cronos V2 contract returns `$XTC` from `symbol()`. The public notat
 - `verification/`: external project verification and KYC references;
 - `ecosystem/`: explorer verification, listings, markets and official community channels;
 - `docs/MIGRATION.md`: migration accounting and verification;
-- `docs/UPGRADE_POLICY.md`: V2 upgrade controls.
+- `docs/UPGRADE_POLICY.md`: how the token is governed and upgraded.
 
 The native XTC asset on Xitcoin EVM is implemented by the chain. It is not an ERC-20 deployment in this repository.
 
@@ -36,7 +40,7 @@ The vault security model and verification procedure are documented in [`docs/BRI
 
 ## Audit and external verification
 
-The current V2 implementation source is covered by the Cyberscope audit referenced in [`audits/README.md`](audits/README.md). The audited SHA-256 matches `contracts/cronos/v2/XTCV2.sol`.
+The V4 implementation source (SHA-256 `48de6f7b…`, [verified on Cronos Explorer](https://explorer.cronos.com/address/0x3F4e9e3b1B4317674AF9C87d69ECA25c76E4a8B5#code)) was audited by Cyberscope (Corrected Phase 5, 29 September 2026) before it went live; the V3 source was audited in February 2026. See [`audits/README.md`](audits/README.md).
 
 Cyberscope's project profile and KYC record are indexed separately in [`verification/README.md`](verification/README.md). KYC confirms an identity-verification result; it does not expand smart-contract audit scope.
 
@@ -44,7 +48,7 @@ No audit coverage is claimed here for V1, the migration contract, Xitcoin EVM or
 
 ## Verification, listings and community
 
-Cronos Explorer verification, CoinGecko, CoinMarketCap, current market-discovery references and official community channels are maintained in [`ecosystem/README.md`](ecosystem/README.md). Third-party markets are not designated as official pools. Always verify the Cronos chain and V2 proxy address before signing.
+Cronos Explorer verification, CoinGecko, CoinMarketCap, current market-discovery references and official community channels are maintained in [`ecosystem/README.md`](ecosystem/README.md). Third-party markets are not designated as official pools. Always verify the Cronos chain and the XTC proxy address before signing.
 
 ## Verification commands
 

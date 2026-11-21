@@ -3,7 +3,7 @@
   "chain_id": 25,
   "asset": {
     "name": "Xitcoin",
-    "on_chain_symbol": "$XTC",
+    "on_chain_symbol": "XTC",
     "public_notation": "XTC",
     "proxy_address": "0xE45FE733BC8617FA6DAC8437FC44B5FFFA949991",
     "decimals": 18
@@ -26,13 +26,15 @@
     }
   },
   "community": {
-    "x": "https://x.com/Xitcoin_org",
-    "telegram": "https://t.me/xitcoin_org",
-    "discord": "https://discord.gg/wFrHx3tAD8"
+    "x": "https://x.com/xitcoin_xtc",
+    "telegram": "https://t.me/official_xitcoin",
+    "discord": "https://discord.gg/kcalbapp",
+    "github": "https://github.com/xitcoin-xtc",
+    "website": "https://xitcoin.com"
   },
   "market_policy": {
     "official_pool_designation": false,
     "mutable_statistics_recorded": false,
-    "verification_requirement": "Confirm the Cronos chain and Xitcoin V2 proxy address before signing."
+    "verification_requirement": "Confirm the Cronos chain and the XTC proxy address before signing."
   }
 }

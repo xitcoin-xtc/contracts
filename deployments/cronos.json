@@ -9,13 +9,50 @@
       "source": "contracts/cronos/v1/XitcoinV1.sol",
       "source_sha256": "43810ac0dfad3de7f65f6848ac6e3953da2024288d0937b62fa80707ff0dd5bf"
     },
-    "v2": {
+    "xtc": {
       "proxy": "0xE45FE733BC8617FA6DAC8437FC44B5FFFA949991",
-      "implementation": "0x6c171952999421F0DA00E14F97B9C2DfBE71D8A0",
-      "contract": "XitcoinImplementation",
+      "symbol": "XTC",
       "decimals": 18,
-      "source": "contracts/cronos/v2/XTCV2.sol",
-      "source_sha256": "b5de4f5c4f13334bf644ec8fa97f8b0cda836ddc76935dc14c7bfcda2a73ff14"
+      "implementation": {
+        "version": "V4",
+        "address": "0x3F4e9e3b1B4317674AF9C87d69ECA25c76E4a8B5",
+        "contract": "XitcoinV4",
+        "verified_source": "https://explorer.cronos.com/address/0x3F4e9e3b1B4317674AF9C87d69ECA25c76E4a8B5#code",
+        "source_sha256": "48de6f7b619b949027a0377adf1f4780f37a0bca283da124d4abb2cc04ab700d",
+        "live_since": "2026-10-01",
+        "installation_tx": "0xc0493440ed43209701cc6898d7d1f738ea173d145a724475c42c40603b5af48f"
+      },
+      "previous_implementations": [
+        {
+          "version": "V3",
+          "address": "0x6c171952999421F0DA00E14F97B9C2DfBE71D8A0",
+          "contract": "XitcoinImplementation",
+          "source": "contracts/cronos/v2/XTCV2.sol",
+          "source_sha256": "b5de4f5c4f13334bf644ec8fa97f8b0cda836ddc76935dc14c7bfcda2a73ff14",
+          "live_from": "2026-02-18",
+          "live_until": "2026-10-01"
+        },
+        {
+          "version": "V2",
+          "address": "0xDBCd79A3651C2E0d9ae8736F4652516FAecd5bc7",
+          "live_from": "2025-07-23",
+          "live_until": "2026-02-18"
+        }
+      ],
+      "governance": {
+        "owner": "0x33221850aDC263Ea61cF64662CDa2E7D654eD409",
+        "timelock": {
+          "address": "0x33221850aDC263Ea61cF64662CDa2E7D654eD409",
+          "contract": "TimelockController (OpenZeppelin 5.4.0)",
+          "min_delay_seconds": 172800
+        },
+        "safe": {
+          "address": "0xA18A28A79c2B0b67c8cF37FfF863EbaD75B02945",
+          "version": "Safe 1.4.1",
+          "threshold": "2 of 3",
+          "role": "proposes, executes and can cancel every timelock operation"
+        }
+      }
     },
     "migration": {
       "address": "0x5A570197e4835d0c2F2F956026981E0cff50A8c9",
