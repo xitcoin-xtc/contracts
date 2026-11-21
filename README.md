@@ -22,7 +22,6 @@ Since V4 the token returns `XTC` from `symbol()` (it returned `$XTC` before 1 Oc
 ## Repository layout
 
 - `contracts/cronos/v1/`: verified V1 source;
-- `contracts/cronos/v4/`: verified and audited V4 implementation source (current);
 - `contracts/cronos/v2/`: verified V3 implementation source (historical folder name);
 - `contracts/cronos/migration/`: verified migration source;
 - `contracts/cronos/bridge/`: reviewed bridge custody candidates;
@@ -41,7 +40,7 @@ The vault security model and verification procedure are documented in [`docs/BRI
 
 ## Audit and external verification
 
-The V4 implementation source (SHA-256 `48de6f7b…`, `contracts/cronos/v4/XitcoinV4.sol`) was audited by Cyberscope (Corrected Phase 5, 29 September 2026) before it went live; the V3 source was audited in February 2026. See [`audits/README.md`](audits/README.md).
+The V4 implementation source (SHA-256 `48de6f7b…`, [verified on Cronos Explorer](https://explorer.cronos.com/address/0x3F4e9e3b1B4317674AF9C87d69ECA25c76E4a8B5#code)) was audited by Cyberscope (Corrected Phase 5, 29 September 2026) before it went live; the V3 source was audited in February 2026. See [`audits/README.md`](audits/README.md).
 
 Cyberscope's project profile and KYC record are indexed separately in [`verification/README.md`](verification/README.md). KYC confirms an identity-verification result; it does not expand smart-contract audit scope.
 
@@ -55,7 +54,6 @@ Cronos Explorer verification, CoinGecko, CoinMarketCap, current market-discovery
 
 ```bash
 sha256sum contracts/cronos/v1/XitcoinV1.sol
-sha256sum contracts/cronos/v4/XitcoinV4.sol
 sha256sum contracts/cronos/v2/XTCV2.sol
 sha256sum contracts/cronos/migration/Migration.sol
 npm ci

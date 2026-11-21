@@ -17,7 +17,7 @@
         "version": "V4",
         "address": "0x3F4e9e3b1B4317674AF9C87d69ECA25c76E4a8B5",
         "contract": "XitcoinV4",
-        "source": "contracts/cronos/v4/XitcoinV4.sol",
+        "verified_source": "https://explorer.cronos.com/address/0x3F4e9e3b1B4317674AF9C87d69ECA25c76E4a8B5#code",
         "source_sha256": "48de6f7b619b949027a0377adf1f4780f37a0bca283da124d4abb2cc04ab700d",
         "live_since": "2026-10-01",
         "installation_tx": "0xc0493440ed43209701cc6898d7d1f738ea173d145a724475c42c40603b5af48f"
