@@ -421,8 +421,6 @@ contract VaultDepositInvariantTest is VaultSigning {
     /// The current day's deposit total never exceeds the daily limit, unless
     /// governance lowered the limit below that day's usage (then deposits are
     /// blocked for the rest of the day; see the fuzz test above).
-    /// forge-config: default.invariant.runs = 64
-    /// forge-config: default.invariant.depth = 64
     function invariant_dailyDepositedWithinLimit() public view {
         if (vault.depositDay() != handler.currentDay()) return;
         require(
@@ -434,8 +432,6 @@ contract VaultDepositInvariantTest is VaultSigning {
 
     /// No successful deposit ever exceeded the per-deposit maximum, the daily
     /// limit, or left the vault balance above maxLockedAmount.
-    /// forge-config: default.invariant.runs = 64
-    /// forge-config: default.invariant.depth = 64
     function invariant_depositsNeverExceedLimitsInForce() public view {
         require(!handler.acceptedOverPerDepositMaximum(), "per-deposit maximum bypassed");
         require(!handler.acceptedOverDailyLimit(), "daily deposit limit bypassed");
@@ -444,16 +440,12 @@ contract VaultDepositInvariantTest is VaultSigning {
 
     /// Acceptance matches the specification exactly: a deposit is accepted if
     /// and only if it satisfies all three limits in force.
-    /// forge-config: default.invariant.runs = 64
-    /// forge-config: default.invariant.depth = 64
     function invariant_depositAcceptanceMatchesLimits() public view {
         require(!handler.acceptedOutsideLimits(), "deposit outside limits accepted");
         require(!handler.rejectedWithinLimits(), "deposit within limits rejected");
     }
 
     /// Custody conservation and nonce accounting across the whole sequence.
-    /// forge-config: default.invariant.runs = 64
-    /// forge-config: default.invariant.depth = 64
     function invariant_custodyAndNonceAccounting() public view {
         require(
             token.balanceOf(address(vault)) ==

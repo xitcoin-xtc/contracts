@@ -1,0 +1,67 @@
+name: Nightly fuzz
+
+# Deep run of the Solidity fuzz and invariant suites in test/foundry, with a
+# fresh seed every night. Pull requests run the same suites with the smaller
+# defaults from hardhat.config.js.
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Fuzz seed to replay (0x-prefixed hex). Leave empty for a fresh seed.'
+        required: false
+        default: ''
+
+permissions: {}
+
+concurrency:
+  group: nightly-fuzz
+  cancel-in-progress: false
+
+jobs:
+  deep-fuzz:
+    name: Deep fuzz and invariant campaign
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    env:
+      SOLIDITY_FUZZ_RUNS: '10000'
+      SOLIDITY_INVARIANT_RUNS: '1000'
+      SOLIDITY_INVARIANT_DEPTH: '128'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: '.nvmrc'
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Choose the fuzz seed
+        env:
+          REQUESTED_SEED: ${{ inputs.seed }}
+        run: |
+          seed="${REQUESTED_SEED:-0x$(openssl rand -hex 16)}"
+          if [[ ! "$seed" =~ ^0x[0-9a-fA-F]{1,64}$ ]]; then
+            echo "Invalid seed: $seed" >&2
+            exit 1
+          fi
+          echo "SOLIDITY_FUZZ_SEED=$seed" >> "$GITHUB_ENV"
+          {
+            echo "Fuzz seed: \`$seed\`"
+            echo
+            echo "Replay locally: \`SOLIDITY_FUZZ_SEED=$seed SOLIDITY_FUZZ_RUNS=$SOLIDITY_FUZZ_RUNS SOLIDITY_INVARIANT_RUNS=$SOLIDITY_INVARIANT_RUNS SOLIDITY_INVARIANT_DEPTH=$SOLIDITY_INVARIANT_DEPTH npx hardhat test solidity\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the deep Solidity campaign
+        run: npx hardhat test solidity
