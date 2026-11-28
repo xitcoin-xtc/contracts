@@ -1,5 +1,7 @@
 # Independent audits
 
+The audits listed here cover the XTC token contract only. They do not cover the Xitcoin chain, the bridge vault (`CronosBridgeVault`) or the bootstrap escrow (`CronosBootstrapEscrow`). No audit of the chain or the bridge has been published.
+
 | Component | Auditor | Status | Reference |
 |---|---|---|---|
 | XTC implementation V4 (current) | Cyberscope | Corrected Phase 5, 29 Sep 2026 | [Audit record](cyberscope-v4.md) |
@@ -9,3 +11,7 @@
 | Xitcoin chain and bridge | — | No report published | — |
 
 Audit coverage is established by the audited source hash, not by a filename, deployment name or project-level score. Each record in this directory states its exact scope and exclusions.
+
+[`cronos-uups-control-2026-08-27.md`](cronos-uups-control-2026-08-27.md) is a read-only check of who could upgrade the XTC proxy on 27 August 2026 (V3). It is a verification record, not an audit.
+
+The bridge contracts are covered by automated tests in this repository (`test/`), which run in CI. Tests are not an audit.

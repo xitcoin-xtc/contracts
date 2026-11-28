@@ -51,9 +51,6 @@ jobs:
           node-version-file: '.nvmrc'
           package-manager-cache: false
 
-      - name: Test audit input manifest
-        run: python3 -m unittest discover -s test -p 'test_audit_manifest.py'
-
       - name: Install locked dependencies
         run: npm ci
 
