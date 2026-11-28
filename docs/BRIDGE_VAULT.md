@@ -119,7 +119,10 @@ npm ci
 npm run audit:production
 npm run compile
 npm run test:vault
+npm test
 ```
+
+`npm test` also runs the Solidity fuzz and invariant suites in `test/foundry/`, including stateful attack simulations of the vault and the escrow. The properties they enforce are listed in [`test/foundry/INVARIANTS.md`](../test/foundry/INVARIANTS.md). A nightly workflow repeats them with larger campaigns and a fresh seed; set `SOLIDITY_FUZZ_SEED`, `SOLIDITY_FUZZ_RUNS`, `SOLIDITY_INVARIANT_RUNS` and `SOLIDITY_INVARIANT_DEPTH` to reproduce a nightly run locally.
 
 The package lock is authoritative. Do not apply an automated breaking dependency rewrite to deployment tooling.
 
