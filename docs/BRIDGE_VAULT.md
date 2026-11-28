@@ -33,7 +33,7 @@ The implementation address may change through the independently governed UUPS up
 - the emergency guardian can pause immediately but cannot resume the vault;
 - resumption, signer rotation, release and deposit limit changes, guardian changes and foreign-token rescue require signer quorum and a monotonic governance nonce;
 - no owner or administrative withdrawal of canonical XTC exists;
-- a quorum-controlled rescue is restricted to unrelated ERC-20 assets.
+- a quorum-controlled rescue is restricted to unrelated ERC-20 assets; it reverts if the vault's XTC balance changes, so a token address that shares XTC's balance ledger cannot be used to move XTC.
 
 The signer service must approve a release only after independently confirming finality, the native burn amount, the recipient, the route, the signer-set version and the absence of an earlier approval for the same burn identifier.
 
@@ -156,7 +156,8 @@ tCRO deployer and overwriting an earlier record. Deposit limits default to
 
 The vault recorded in `deployments/cronos-testnet.json` was deployed from the
 earlier bytecode and predates deposit limits: it has no deposit limits and its
-constructor takes seven arguments. Testing deposit limits on Cronos testnet
+constructor takes seven arguments. It also predates the canonical-balance check
+in `rescueForeignToken`. Testing deposit limits on Cronos testnet
 needs a new, separately reviewed deployment.
 
 Use `.env.example` as a variable checklist, inject the values from a private

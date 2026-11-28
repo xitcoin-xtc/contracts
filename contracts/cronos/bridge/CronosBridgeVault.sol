@@ -450,7 +450,10 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
     }
 
     /// @notice Recovers an unrelated ERC-20 sent to the vault by mistake.
-    /// @dev Canonical XTC can never be transferred through this function.
+    /// @dev Canonical XTC can never be transferred through this function: the
+    ///      canonical address is refused, and the call reverts if the vault's
+    ///      canonical balance changes, which also covers a token address that
+    ///      shares the canonical asset's balance ledger.
     function rescueForeignToken(
         IERC20 token,
         address recipient,
@@ -475,7 +478,11 @@ contract CronosBridgeVault is EIP712, Pausable, ReentrancyGuard {
             signatures
         );
 
+        uint256 canonicalBalanceBefore = asset.balanceOf(address(this));
         token.safeTransfer(recipient, amount);
+        if (asset.balanceOf(address(this)) != canonicalBalanceBefore) {
+            revert CanonicalAssetRescueForbidden();
+        }
         emit ForeignTokenRescued(
             address(token),
             recipient,
