@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Development toolchain (Hardhat, test and lint tools) in one pull request.
+      # Runtime dependencies (OpenZeppelin, compiled into the bridge contracts)
+      # stay ungrouped so that every bytecode-affecting change is reviewed alone.
+      toolchain-minor-and-patch:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch

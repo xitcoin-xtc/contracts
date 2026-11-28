@@ -82,6 +82,16 @@ The full audit and Solidity tests remain blocking in CI. Remove this temporary
 patch when a supported upstream release provides equivalent compatibility;
 do not replace Zod 4 with the vulnerable `zod/v3` compatibility entry.
 
+## Continuous integration
+
+Pull requests that change contracts, tests or tooling compile the contracts, run the Mocha and Solidity test suites, run Slither (blocking at medium severity and above) and solhint, and run `npm audit` (blocking at high severity). Every pull request also runs dependency review, a gitleaks scan of the full Git history and a check that every GitHub Action is pinned by full commit SHA and every container image by `@sha256` digest. Dependabot proposes npm and GitHub Actions updates weekly.
+
+```bash
+npm run lint:sol        # solhint
+npm run lint:workflows  # pinned actions and images
+npm test                # Mocha and Solidity tests
+```
+
 ## Security
 
 Verify the chain, address and intended function before signing. Report vulnerabilities privately according to [`SECURITY.md`](SECURITY.md).

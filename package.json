@@ -11,6 +11,8 @@
     "test:vault": "hardhat test test/CronosBridgeVault.test.js",
     "test:testnet-deployment": "hardhat test test/CronosTestnetDeployment.test.js",
     "compile": "hardhat compile",
+    "lint:sol": "solhint --noPrompt --max-warnings 0 'contracts/cronos/bridge/**/*.sol' && solhint --noPrompt --max-warnings 0 -c test/.solhint.json 'contracts/test/**/*.sol' 'test/**/*.sol'",
+    "lint:workflows": "bash scripts/verify-actions-pinned.sh",
     "deploy:cronos-testnet": "hardhat run scripts/deploy-cronos-testnet.js --network cronosTestnet",
     "clean": "hardhat clean",
     "audit:production": "npm audit --omit=dev",
@@ -29,7 +31,8 @@
     "chai": "6.2.2",
     "ethers": "6.17.0",
     "hardhat": "3.14.0",
-    "mocha": "11.8.0"
+    "mocha": "11.8.0",
+    "solhint": "6.2.5"
   },
   "dependencies": {
     "@openzeppelin/contracts": "5.4.0",
@@ -39,6 +42,10 @@
     "diff": "9.0.0",
     "serialize-javascript": "7.1.3",
     "mocha": {
+      "glob": "14.0.2",
+      "minimatch": "11.0.1"
+    },
+    "solhint": {
       "glob": "14.0.2",
       "minimatch": "11.0.1"
     },
